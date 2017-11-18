@@ -1,6 +1,11 @@
-[![](docs/images/logo.png)](http://chainercv.readthedocs.io/en/stable/)
+Fork from [chainer_cv](https://github.com/chainer/chainercv)
 
-[![travis](https://travis-ci.org/chainer/chainercv.svg?branch=master)](https://travis-ci.org/chainer/chainercv)
+I updated the environment.yml, here are the [Conda Instructions](http://chainercv.readthedocs.io/en/stable/#install-guide) (You most probably don't need the conda config stuff, the part after 'Download ChainerCV' should do)
+
+***
+Original Readme:
+
+[![](docs/images/logo.png)](http://chainercv.readthedocs.io/en/stable/)
 
 # ChainerCV: a Library for Deep Learning in Computer Vision
 
