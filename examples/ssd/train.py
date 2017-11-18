@@ -1,5 +1,6 @@
 import argparse
 import copy
+import csv
 import numpy as np
 
 import chainer
@@ -8,11 +9,7 @@ from chainer.optimizer import WeightDecay
 from chainer import serializers
 from chainer import training
 from chainer.training import extensions
-from chainer.training import triggers
 
-from chainercv.datasets import voc_bbox_label_names
-from chainercv.datasets import VOCBboxDataset
-from chainercv.extensions import DetectionVOCEvaluator
 from chainercv.links.model.ssd import GradientScaling
 from chainercv.links.model.ssd import multibox_loss
 from chainercv.links import SSD300
@@ -23,23 +20,33 @@ from chainercv.links.model.ssd import random_crop_with_bbox_constraints
 from chainercv.links.model.ssd import random_distort
 from chainercv.links.model.ssd import resize_with_random_interpolation
 
+from chainercv.utils import read_image
 
-class ConcatenatedDataset(chainer.dataset.DatasetMixin):
+from os import listdir
+from os.path import isfile, join
 
-    def __init__(self, *datasets):
-        self._datasets = datasets
+
+class OwnDataset(chainer.dataset.DatasetMixin):
+
+    def __init__(self, csv_path, img_path):
+        self._imgs = [join(img_path, f) for f in listdir(img_path) if isfile(join(img_path, f))]
+        self._csv_files = [join(csv_path, f) for f in listdir(csv_path) if isfile(join(csv_path, f))]
+        print(self._imgs)
 
     def __len__(self):
-        return sum(len(dataset) for dataset in self._datasets)
+        return len(self._imgs)
 
     def get_example(self, i):
-        if i < 0:
-            raise IndexError
-        for dataset in self._datasets:
-            if i < len(dataset):
-                return dataset[i]
-            i -= len(dataset)
-        raise IndexError
+        with open(self._csv_files[i], 'r') as bbox_file:
+            bbox = []
+            csvreader = csv.reader(bbox_file, delimiter=';')
+            for row in csvreader:
+                bbox.append(row)
+        label = np.stack(['0' for _ in bbox]).astype(np.int32)
+        bbox = np.stack(bbox).astype(np.float32)
+        img = read_image(self._imgs[i], color=True)
+        print(bbox)
+        return img, bbox, label
 
 
 class MultiboxTrainChain(chainer.Chain):
@@ -128,15 +135,17 @@ def main():
     parser.add_argument('--gpu', type=int, default=-1)
     parser.add_argument('--out', default='result')
     parser.add_argument('--resume')
+    parser.add_argument('--csvs', required=True)
+    parser.add_argument('--imgs', required=True)
     args = parser.parse_args()
 
     if args.model == 'ssd300':
         model = SSD300(
-            n_fg_class=len(voc_bbox_label_names),
+            n_fg_class=1,
             pretrained_model='imagenet')
     elif args.model == 'ssd512':
         model = SSD512(
-            n_fg_class=len(voc_bbox_label_names),
+            n_fg_class=1,
             pretrained_model='imagenet')
 
     model.use_preset('evaluate')
@@ -146,18 +155,9 @@ def main():
         model.to_gpu()
 
     train = TransformDataset(
-        ConcatenatedDataset(
-            VOCBboxDataset(year='2007', split='trainval'),
-            VOCBboxDataset(year='2012', split='trainval')
-        ),
+        OwnDataset(args.csvs, args.imgs),
         Transform(model.coder, model.insize, model.mean))
     train_iter = chainer.iterators.MultiprocessIterator(train, args.batchsize)
-
-    test = VOCBboxDataset(
-        year='2007', split='test',
-        use_difficult=True, return_difficult=True)
-    test_iter = chainer.iterators.SerialIterator(
-        test, args.batchsize, repeat=False, shuffle=False)
 
     # initial lr is set to 1e-3 by ExponentialShift
     optimizer = chainer.optimizers.MomentumSGD()
@@ -169,31 +169,20 @@ def main():
             param.update_rule.add_hook(WeightDecay(0.0005))
 
     updater = training.StandardUpdater(train_iter, optimizer, device=args.gpu)
-    trainer = training.Trainer(updater, (120000, 'iteration'), args.out)
+    trainer = training.Trainer(updater, (1, 'iteration'), args.out)
     trainer.extend(
-        extensions.ExponentialShift('lr', 0.1, init=1e-3),
-        trigger=triggers.ManualScheduleTrigger([80000, 100000], 'iteration'))
+        extensions.ExponentialShift('lr', 0.1, init=1e-3))
 
-    trainer.extend(
-        DetectionVOCEvaluator(
-            test_iter, model, use_07_metric=True,
-            label_names=voc_bbox_label_names),
-        trigger=(10000, 'iteration'))
-
-    log_interval = 10, 'iteration'
-    trainer.extend(extensions.LogReport(trigger=log_interval))
-    trainer.extend(extensions.observe_lr(), trigger=log_interval)
+    trainer.extend(extensions.observe_lr())
     trainer.extend(extensions.PrintReport(
         ['epoch', 'iteration', 'lr',
          'main/loss', 'main/loss/loc', 'main/loss/conf',
-         'validation/main/map']),
-        trigger=log_interval)
-    trainer.extend(extensions.ProgressBar(update_interval=10))
+         'validation/main/map']))
+    trainer.extend(extensions.ProgressBar(update_interval=1))
 
-    trainer.extend(extensions.snapshot(), trigger=(10000, 'iteration'))
+    trainer.extend(extensions.snapshot())
     trainer.extend(
-        extensions.snapshot_object(model, 'model_iter_{.updater.iteration}'),
-        trigger=(120000, 'iteration'))
+        extensions.snapshot_object(model, 'model_iter_{.updater.iteration}'))
 
     if args.resume:
         serializers.load_npz(args.resume, trainer)
