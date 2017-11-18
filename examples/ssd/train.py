@@ -9,7 +9,10 @@ from chainer.optimizer import WeightDecay
 from chainer import serializers
 from chainer import training
 from chainer.training import extensions
+from chainer.training import triggers
 
+from chainercv.datasets import voc_bbox_label_names
+from chainercv.extensions import DetectionVOCEvaluator
 from chainercv.links.model.ssd import GradientScaling
 from chainercv.links.model.ssd import multibox_loss
 from chainercv.links import SSD300
@@ -29,9 +32,10 @@ from os.path import isfile, join
 class OwnDataset(chainer.dataset.DatasetMixin):
 
     def __init__(self, csv_path, img_path):
-        self._imgs = [join(img_path, f) for f in listdir(img_path) if isfile(join(img_path, f))]
-        self._csv_files = [join(csv_path, f) for f in listdir(csv_path) if isfile(join(csv_path, f))]
-        print(self._imgs)
+        self._imgs = [join(img_path, f) for f in listdir(img_path) if
+                      isfile(join(img_path, f))]
+        self._csv_files = [join(csv_path, f) for f in listdir(csv_path) if
+                           isfile(join(csv_path, f))]
 
     def __len__(self):
         return len(self._imgs)
@@ -45,7 +49,6 @@ class OwnDataset(chainer.dataset.DatasetMixin):
         label = np.stack(['0' for _ in bbox]).astype(np.int32)
         bbox = np.stack(bbox).astype(np.float32)
         img = read_image(self._imgs[i], color=True)
-        print(bbox)
         return img, bbox, label
 
 
@@ -159,6 +162,10 @@ def main():
         Transform(model.coder, model.insize, model.mean))
     train_iter = chainer.iterators.MultiprocessIterator(train, args.batchsize)
 
+    test = OwnDataset(args.csvs, args.imgs)
+    test_iter = chainer.iterators.SerialIterator(
+        test, args.batchsize, repeat=False, shuffle=False)
+
     # initial lr is set to 1e-3 by ExponentialShift
     optimizer = chainer.optimizers.MomentumSGD()
     optimizer.setup(train_chain)
@@ -169,20 +176,31 @@ def main():
             param.update_rule.add_hook(WeightDecay(0.0005))
 
     updater = training.StandardUpdater(train_iter, optimizer, device=args.gpu)
-    trainer = training.Trainer(updater, (1, 'iteration'), args.out)
+    trainer = training.Trainer(updater, (120000, 'iteration'), args.out)
     trainer.extend(
-        extensions.ExponentialShift('lr', 0.1, init=1e-3))
+        extensions.ExponentialShift('lr', 0.1, init=1e-3),
+        trigger=triggers.ManualScheduleTrigger([80000, 100000], 'iteration'))
 
-    trainer.extend(extensions.observe_lr())
+    trainer.extend(
+        DetectionVOCEvaluator(
+            test_iter, model, use_07_metric=True,
+            label_names=voc_bbox_label_names),
+        trigger=(10000, 'iteration'))
+
+    log_interval = 10, 'iteration'
+    trainer.extend(extensions.LogReport(trigger=log_interval))
+    trainer.extend(extensions.observe_lr(), trigger=log_interval)
     trainer.extend(extensions.PrintReport(
         ['epoch', 'iteration', 'lr',
          'main/loss', 'main/loss/loc', 'main/loss/conf',
-         'validation/main/map']))
-    trainer.extend(extensions.ProgressBar(update_interval=1))
+         'validation/main/map']),
+        trigger=log_interval)
+    trainer.extend(extensions.ProgressBar(update_interval=10))
 
-    trainer.extend(extensions.snapshot())
+    trainer.extend(extensions.snapshot(), trigger=(10000, 'iteration'))
     trainer.extend(
-        extensions.snapshot_object(model, 'model_iter_{.updater.iteration}'))
+        extensions.snapshot_object(model, 'model_iter_{.updater.iteration}'),
+        trigger=(120000, 'iteration'))
 
     if args.resume:
         serializers.load_npz(args.resume, trainer)
