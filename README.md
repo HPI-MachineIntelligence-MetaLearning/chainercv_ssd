@@ -2,6 +2,8 @@ Fork from [chainer_cv](https://github.com/chainer/chainercv)
 
 I updated the environment.yml, here are the [Conda Instructions](http://chainercv.readthedocs.io/en/stable/#install-guide) (You most probably don't need the conda config stuff, the part after 'Download ChainerCV' should do)
 
+All of the changes happened in the [examples folder](https://github.com/HPI-MachineIntelligence-MetaLearning/chainercv_ssd/tree/master/examples/ssd).
+
 ***
 Original Readme:
 
