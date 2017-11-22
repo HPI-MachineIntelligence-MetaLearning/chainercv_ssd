@@ -22,7 +22,7 @@ from chainercv.links.model.ssd import random_crop_with_bbox_constraints
 from chainercv.links.model.ssd import random_distort
 from chainercv.links.model.ssd import resize_with_random_interpolation
 
-from xmldataset import XMLDataset, LABEL_DICT
+from xmldataset import XMLDataset, LABEL_NAMES
 
 
 class MultiboxTrainChain(chainer.Chain):
@@ -67,43 +67,46 @@ class Transform(object):
 
         img, bbox, label = in_data
 
-        if len(bbox[0]) > 0:
-            # 1. Color augmentation
-            img = random_distort(img)
+        if len(bbox[0]) == 0:
+            bbox = np.empty((0, 4))
+            label = np.empty((0, 4))
 
-            # 2. Random expansion
-            if np.random.randint(2):
-                img, param = transforms.random_expand(
-                    img, fill=self.mean, return_param=True)
-                bbox = transforms.translate_bbox(
-                    bbox, y_offset=param['y_offset'],
-                    x_offset=param['x_offset'])
+        # 1. Color augmentation
+        img = random_distort(img)
 
-            # 3. Random cropping
-            img, param = random_crop_with_bbox_constraints(
-                img, bbox, return_param=True)
-            bbox, param = transforms.crop_bbox(
-                bbox, y_slice=param['y_slice'], x_slice=param['x_slice'],
-                allow_outside_center=False, return_param=True)
-            label = label[param['index']]
+        # 2. Random expansion
+        if np.random.randint(2):
+            img, param = transforms.random_expand(
+                img, fill=self.mean, return_param=True)
+            bbox = transforms.translate_bbox(
+                bbox, y_offset=param['y_offset'],
+                x_offset=param['x_offset'])
 
-            # 4. Resizing with random interpolatation
-            _, H, W = img.shape
-            img = resize_with_random_interpolation(img, (self.size, self.size))
-            bbox = transforms.resize_bbox(bbox, (H, W), (self.size, self.size))
+        # 3. Random cropping
+        img, param = random_crop_with_bbox_constraints(
+            img, bbox, return_param=True)
+        bbox, param = transforms.crop_bbox(
+            bbox, y_slice=param['y_slice'], x_slice=param['x_slice'],
+            allow_outside_center=False, return_param=True)
+        label = label[param['index']]
 
-            # 5. Random horizontal flipping
-            img, params = transforms.random_flip(
-                img, x_random=True, return_param=True)
-            bbox = transforms.flip_bbox(
-                bbox, (self.size, self.size), x_flip=params['x_flip'])
+        # 4. Resizing with random interpolatation
+        _, H, W = img.shape
+        img = resize_with_random_interpolation(img, (self.size, self.size))
+        bbox = transforms.resize_bbox(bbox, (H, W), (self.size, self.size))
 
-            # Preparation for SSD network
-            img -= self.mean
-            mb_loc, mb_label = self.coder.encode(bbox, label)
+        # 5. Random horizontal flipping
+        img, params = transforms.random_flip(
+            img, x_random=True, return_param=True)
+        bbox = transforms.flip_bbox(
+            bbox, (self.size, self.size), x_flip=params['x_flip'])
 
-            return img, mb_loc, mb_label
-        return img, bbox, label
+        # Preparation for SSD network
+        img -= self.mean
+        mb_loc, mb_label = self.coder.encode(bbox, label)
+        # print(np.shape(mb_loc), np.shape(img))
+
+        return img, mb_loc, mb_label
 
 
 def main():
@@ -116,7 +119,8 @@ def main():
     parser.add_argument('--resume')
     parser.add_argument('--imgs', required=True)
     args = parser.parse_args()
-    num_labels = len(LABEL_DICT.keys())
+    num_labels = len(LABEL_NAMES)
+    # num_labels = len(voc_bbox_label_names)
 
     if args.model == 'ssd300':
         model = SSD300(
@@ -136,7 +140,7 @@ def main():
     train = TransformDataset(
         XMLDataset(args.imgs),
         Transform(model.coder, model.insize, model.mean))
-    train_iter = chainer.iterators.MultiprocessIterator(train, args.batchsize)
+    train_iter = chainer.iterators.SerialIterator(train, args.batchsize)
 
     test = XMLDataset(args.imgs)
     test_iter = chainer.iterators.SerialIterator(
@@ -160,7 +164,7 @@ def main():
     trainer.extend(
         DetectionVOCEvaluator(
             test_iter, model, use_07_metric=True,
-            label_names=voc_bbox_label_names),
+            label_names=LABEL_NAMES),
         trigger=(10000, 'iteration'))
 
     log_interval = 10, 'iteration'

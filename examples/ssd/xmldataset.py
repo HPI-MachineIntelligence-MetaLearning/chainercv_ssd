@@ -8,15 +8,17 @@ from chainercv.utils import read_image
 from os import listdir
 from os.path import isfile, join
 
-LABEL_DICT = {'other': '0',
-              'berlinerdom': '1',
-              'brandenburgertor': '2',
-              'fernsehturm': '3',
-              'funkturm': '4',
-              'reichstag': '5',
-              'rotesrathaus': '6',
-              'siegessaeule': '7'
-              }
+from chainercv.datasets import voc_bbox_label_names
+
+
+LABEL_NAMES = ('other',
+               'berlinerdom',
+               'brandenburgertor',
+               'fernsehturm',
+               'funkturm',
+               'reichstag',
+               'rotesrathaus',
+               'siegessaeule')
 
 
 class XMLDataset(chainer.dataset.DatasetMixin):
@@ -49,7 +51,7 @@ class XMLDataset(chainer.dataset.DatasetMixin):
                     int(bndbox_anno.find(tag).text) - 1
                     for tag in ('ymin', 'xmin', 'ymax', 'xmax')])
                 name = obj.find('name').text.lower().strip()
-                label.append(LABEL_DICT[name])
+                label.append(LABEL_NAMES.index(name))
         except FileNotFoundError:
             bbox.append([])
             label.append([])
