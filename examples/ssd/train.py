@@ -22,7 +22,7 @@ from chainercv.links.model.ssd import random_crop_with_bbox_constraints
 from chainercv.links.model.ssd import random_distort
 from chainercv.links.model.ssd import resize_with_random_interpolation
 
-from xmldataset import XMLDataset
+from xmldataset import XMLDataset, LABEL_DICT
 
 
 class MultiboxTrainChain(chainer.Chain):
@@ -116,14 +116,15 @@ def main():
     parser.add_argument('--resume')
     parser.add_argument('--imgs', required=True)
     args = parser.parse_args()
+    num_labels = len(LABEL_DICT.keys())
 
     if args.model == 'ssd300':
         model = SSD300(
-            n_fg_class=1,
+            n_fg_class=num_labels,
             pretrained_model='imagenet')
     elif args.model == 'ssd512':
         model = SSD512(
-            n_fg_class=1,
+            n_fg_class=num_labels,
             pretrained_model='imagenet')
 
     model.use_preset('evaluate')
