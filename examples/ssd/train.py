@@ -1,6 +1,5 @@
 import argparse
 import copy
-import csv
 import numpy as np
 
 import chainer
@@ -23,33 +22,7 @@ from chainercv.links.model.ssd import random_crop_with_bbox_constraints
 from chainercv.links.model.ssd import random_distort
 from chainercv.links.model.ssd import resize_with_random_interpolation
 
-from chainercv.utils import read_image
-
-from os import listdir
-from os.path import isfile, join
-
-
-class OwnDataset(chainer.dataset.DatasetMixin):
-
-    def __init__(self, csv_path, img_path):
-        self._imgs = [join(img_path, f) for f in listdir(img_path) if
-                      isfile(join(img_path, f))]
-        self._csv_files = [join(csv_path, f) for f in listdir(csv_path) if
-                           isfile(join(csv_path, f))]
-
-    def __len__(self):
-        return len(self._imgs)
-
-    def get_example(self, i):
-        with open(self._csv_files[i], 'r') as bbox_file:
-            bbox = []
-            csvreader = csv.reader(bbox_file, delimiter=';')
-            for row in csvreader:
-                bbox.append(row)
-        label = np.stack(['0' for _ in bbox]).astype(np.int32)
-        bbox = np.stack(bbox).astype(np.float32)
-        img = read_image(self._imgs[i], color=True)
-        return img, bbox, label
+from xmldataset import XMLDataset
 
 
 class MultiboxTrainChain(chainer.Chain):
@@ -94,40 +67,43 @@ class Transform(object):
 
         img, bbox, label = in_data
 
-        # 1. Color augmentation
-        img = random_distort(img)
+        if len(bbox[0]) > 0:
+            # 1. Color augmentation
+            img = random_distort(img)
 
-        # 2. Random expansion
-        if np.random.randint(2):
-            img, param = transforms.random_expand(
-                img, fill=self.mean, return_param=True)
-            bbox = transforms.translate_bbox(
-                bbox, y_offset=param['y_offset'], x_offset=param['x_offset'])
+            # 2. Random expansion
+            if np.random.randint(2):
+                img, param = transforms.random_expand(
+                    img, fill=self.mean, return_param=True)
+                bbox = transforms.translate_bbox(
+                    bbox, y_offset=param['y_offset'],
+                    x_offset=param['x_offset'])
 
-        # 3. Random cropping
-        img, param = random_crop_with_bbox_constraints(
-            img, bbox, return_param=True)
-        bbox, param = transforms.crop_bbox(
-            bbox, y_slice=param['y_slice'], x_slice=param['x_slice'],
-            allow_outside_center=False, return_param=True)
-        label = label[param['index']]
+            # 3. Random cropping
+            img, param = random_crop_with_bbox_constraints(
+                img, bbox, return_param=True)
+            bbox, param = transforms.crop_bbox(
+                bbox, y_slice=param['y_slice'], x_slice=param['x_slice'],
+                allow_outside_center=False, return_param=True)
+            label = label[param['index']]
 
-        # 4. Resizing with random interpolatation
-        _, H, W = img.shape
-        img = resize_with_random_interpolation(img, (self.size, self.size))
-        bbox = transforms.resize_bbox(bbox, (H, W), (self.size, self.size))
+            # 4. Resizing with random interpolatation
+            _, H, W = img.shape
+            img = resize_with_random_interpolation(img, (self.size, self.size))
+            bbox = transforms.resize_bbox(bbox, (H, W), (self.size, self.size))
 
-        # 5. Random horizontal flipping
-        img, params = transforms.random_flip(
-            img, x_random=True, return_param=True)
-        bbox = transforms.flip_bbox(
-            bbox, (self.size, self.size), x_flip=params['x_flip'])
+            # 5. Random horizontal flipping
+            img, params = transforms.random_flip(
+                img, x_random=True, return_param=True)
+            bbox = transforms.flip_bbox(
+                bbox, (self.size, self.size), x_flip=params['x_flip'])
 
-        # Preparation for SSD network
-        img -= self.mean
-        mb_loc, mb_label = self.coder.encode(bbox, label)
+            # Preparation for SSD network
+            img -= self.mean
+            mb_loc, mb_label = self.coder.encode(bbox, label)
 
-        return img, mb_loc, mb_label
+            return img, mb_loc, mb_label
+        return img, bbox, label
 
 
 def main():
@@ -138,7 +114,6 @@ def main():
     parser.add_argument('--gpu', type=int, default=-1)
     parser.add_argument('--out', default='result')
     parser.add_argument('--resume')
-    parser.add_argument('--csvs', required=True)
     parser.add_argument('--imgs', required=True)
     args = parser.parse_args()
 
@@ -158,11 +133,11 @@ def main():
         model.to_gpu()
 
     train = TransformDataset(
-        OwnDataset(args.csvs, args.imgs),
+        XMLDataset(args.imgs),
         Transform(model.coder, model.insize, model.mean))
     train_iter = chainer.iterators.MultiprocessIterator(train, args.batchsize)
 
-    test = OwnDataset(args.csvs, args.imgs)
+    test = XMLDataset(args.imgs)
     test_iter = chainer.iterators.SerialIterator(
         test, args.batchsize, repeat=False, shuffle=False)
 
