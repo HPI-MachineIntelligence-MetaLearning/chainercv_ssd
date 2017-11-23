@@ -10,7 +10,6 @@ channels:
   'anaconda'
 dependencies:
   - Cython
-  - chainercv
   - opencv=3.2.0
   - pillow=4.2.1
   - chainer=2.1.0
