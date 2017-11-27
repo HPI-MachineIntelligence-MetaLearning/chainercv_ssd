@@ -118,7 +118,6 @@ def main():
     parser.add_argument('--out', default='result')
     parser.add_argument('--resume')
     parser.add_argument('--imgs', required=True)
-    parser.add_argument('--test', required=True)
     args = parser.parse_args()
     num_labels = len(LABEL_NAMES)
     # num_labels = len(voc_bbox_label_names)
@@ -143,7 +142,7 @@ def main():
         Transform(model.coder, model.insize, model.mean))
     train_iter = chainer.iterators.MultiprocessIterator(train, args.batchsize)
 
-    test = XMLDataset(args.test, split='test')
+    test = XMLDataset(args.imgs, split='test')
     test_iter = chainer.iterators.SerialIterator(
         test, args.batchsize, repeat=False, shuffle=False)
 
