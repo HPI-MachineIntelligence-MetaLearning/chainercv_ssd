@@ -9,6 +9,7 @@ channels:
 - !!python/unicode
   'anaconda'
 dependencies:
+  - python=3.5
   - Cython
   - opencv=3.2.0
   - pillow=4.2.1

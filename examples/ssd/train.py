@@ -118,6 +118,7 @@ def main():
     parser.add_argument('--out', default='result')
     parser.add_argument('--resume')
     parser.add_argument('--imgs', required=True)
+    parser.add_argument('--test', required=True)
     args = parser.parse_args()
     num_labels = len(LABEL_NAMES)
     # num_labels = len(voc_bbox_label_names)
@@ -140,9 +141,9 @@ def main():
     train = TransformDataset(
         XMLDataset(args.imgs),
         Transform(model.coder, model.insize, model.mean))
-    train_iter = chainer.iterators.SerialIterator(train, args.batchsize)
+    train_iter = chainer.iterators.MultiprocessIterator(train, args.batchsize)
 
-    test = XMLDataset(args.imgs)
+    test = XMLDataset(args.test)
     test_iter = chainer.iterators.SerialIterator(
         test, args.batchsize, repeat=False, shuffle=False)
 
@@ -177,7 +178,7 @@ def main():
         trigger=log_interval)
     trainer.extend(extensions.ProgressBar(update_interval=10))
 
-    trainer.extend(extensions.snapshot(), trigger=(10000, 'iteration'))
+    trainer.extend(extensions.snapshot(), trigger=(1000, 'iteration'))
     trainer.extend(
         extensions.snapshot_object(model, 'model_iter_{.updater.iteration}'),
         trigger=(120000, 'iteration'))
