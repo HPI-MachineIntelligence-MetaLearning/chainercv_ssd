@@ -143,7 +143,7 @@ def main():
         Transform(model.coder, model.insize, model.mean))
     train_iter = chainer.iterators.MultiprocessIterator(train, args.batchsize)
 
-    test = XMLDataset(args.test)
+    test = XMLDataset(args.test, split='test')
     test_iter = chainer.iterators.SerialIterator(
         test, args.batchsize, repeat=False, shuffle=False)
 
